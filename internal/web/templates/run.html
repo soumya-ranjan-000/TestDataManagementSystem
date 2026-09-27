@@ -1,0 +1,106 @@
+{{define "content"}}
+<p><a href="/runs">← All runs</a></p>
+<h1>Run {{shortID .Data.Run.ID}}</h1>
+{{template "live" .}}
+{{with .Data.Log}}
+<section class="panel run-log">
+  <div class="log-head">
+    <h2>Activity log</h2>
+    <a class="button" href="/runs/{{.RunID}}/log.txt" download>Download log (.txt)</a>
+  </div>
+  <form id="log-filters" class="toolbar"
+        hx-get="/runs/{{.RunID}}/log" hx-target="#run-log" hx-swap="outerHTML"
+        hx-trigger="submit, input changed delay:350ms from:find input[name='q'], change from:find select">
+    <input type="search" name="q" value="{{.Q}}" placeholder="Search by test case or message" class="grow" maxlength="200" aria-label="Search the log">
+    <select name="level" aria-label="Level">
+      {{range .Filters}}<option value="{{.Value}}"{{if eq .Value $.Data.Log.Filter}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <select name="size" aria-label="Lines per page">
+      {{range .Sizes}}<option value="{{.}}"{{if eq . $.Data.Log.Size}} selected{{end}}>{{.}} lines per page</option>{{end}}
+    </select>
+  </form>
+  {{template "log" .}}
+</section>
+{{end}}
+{{end}}
+
+{{define "logfrag"}}{{template "log" .Data}}{{end}}
+
+{{define "log"}}
+<div id="run-log" data-loading{{if .Live}} hx-get="{{.SelfURL}}" hx-trigger="every 3s" hx-swap="outerHTML"{{end}}>
+  <p class="muted small">
+    {{if .Total}}Lines {{.From}}–{{.To}} of {{.Total}}{{else if or .Q (ne .Filter "all")}}No log lines match.{{else}}No log lines yet.{{end}}
+    {{if .Live}}<span class="loading-line"><span class="spinner" aria-hidden="true"></span>{{if .Follow}}following live{{else}}refreshing{{end}}</span>{{end}}
+  </p>
+  {{if .Entries}}
+  <table class="log-table" role="log">
+    <thead><tr><th>Time</th><th>Level</th><th>Test case</th><th>Env</th><th>Message</th></tr></thead>
+    <tbody>
+    {{range .Entries}}
+    <tr class="lvl-{{.Level}}">
+      <td class="nowrap mono" title="{{tm $.Loc .At}}">{{clock $.Loc .At}}</td>
+      <td><span class="level lvl-{{.Level}}">{{.Level}}</span></td>
+      <td class="nowrap mono">{{.TestCaseKey}}</td>
+      <td class="nowrap">{{.Environment}}</td>
+      <td class="log-msg">{{.Message}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{end}}
+  {{if gt .Pages 1}}
+  <nav class="pager" aria-label="Log pages">
+    <span class="muted">Page {{.Page}} of {{.Pages}}</span>
+    <span class="pager-links">
+      {{if .FirstURL}}<a href="#" hx-get="{{.FirstURL}}" hx-target="#run-log" hx-swap="outerHTML" aria-label="First page">«</a>{{else}}<span class="disabled">«</span>{{end}}
+      {{if .PrevURL}}<a href="#" hx-get="{{.PrevURL}}" hx-target="#run-log" hx-swap="outerHTML">‹ Prev</a>{{else}}<span class="disabled">‹ Prev</span>{{end}}
+      {{if .NextURL}}<a href="#" hx-get="{{.NextURL}}" hx-target="#run-log" hx-swap="outerHTML">Next ›</a>{{else}}<span class="disabled">Next ›</span>{{end}}
+      {{if .LastURL}}<a href="#" hx-get="{{.LastURL}}" hx-target="#run-log" hx-swap="outerHTML" aria-label="Last page (newest)">»</a>{{else}}<span class="disabled">»</span>{{end}}
+    </span>
+  </nav>
+  {{end}}
+</div>
+{{end}}
+
+{{define "live"}}{{$loc := .Loc}}{{with .Data}}
+<div id="live"{{if .Live}} hx-get="/runs/{{.Run.ID}}/live" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}>
+  <section class="panel">
+    <div class="meta">
+      <div><span class="label">Status</span><span class="badge s-{{.Run.Status}}">{{.Run.Status}}</span>{{if .Live}} <span class="muted">updating…</span>{{end}}</div>
+      <div><span class="label">Mode</span>{{.Run.Mode}}</div>
+      <div><span class="label">Trigger</span>{{.Run.Trigger}}</div>
+      <div><span class="label">Scope</span>{{if .Run.Scope.SlotIDs}}{{len .Run.Scope.SlotIDs}} selected test case(s){{else if .Run.Scope.Environment}}{{.Run.Scope.Environment}}{{else}}whole folder, all environments{{end}}</div>
+      <div><span class="label">Created</span>{{tm $loc .Run.CreatedAt}}</div>
+      <div><span class="label">Finished</span>{{tm $loc .Run.FinishedAt}}</div>
+    </div>
+    <div class="stat-row wide">
+      <div><span class="stat">{{.Run.Counts.Total}}</span><span class="stat-label">checked</span></div>
+      <div><span class="stat ok">{{.Run.Counts.Valid}}</span><span class="stat-label">valid</span></div>
+      <div><span class="stat warn">{{.Run.Counts.Invalid}}</span><span class="stat-label">invalid</span></div>
+      <div><span class="stat">{{.Run.Counts.Generated}}</span><span class="stat-label">generated</span></div>
+      <div><span class="stat {{if .Run.Counts.Errors}}bad{{end}}">{{.Run.Counts.Errors}}</span><span class="stat-label">errors</span></div>
+    </div>
+    {{with .Run.SyncError}}<div class="error">Sync from the test management app failed, so stored blocks were used: {{.}}</div>{{end}}
+    {{with .Run.Error}}<div class="error">The run failed: {{.}}</div>{{end}}
+  </section>
+
+  <table>
+    <thead><tr><th>Test case</th><th>Env</th><th>Outcome</th><th>Old PNR</th><th>New PNR</th><th>Failed rule</th><th>Detail</th></tr></thead>
+    <tbody>
+    {{range .Items}}
+    <tr>
+      <td>{{.TestCaseKey}}</td>
+      <td>{{.Environment}}</td>
+      <td><span class="badge o-{{.Outcome}}">{{.Outcome}}</span></td>
+      <td class="mono">{{deref .OldPNR}}</td>
+      <td class="mono">{{deref .NewPNR}}</td>
+      <td>{{deref .FailedRule}}</td>
+      <td class="detail">{{deref .Error}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="7" class="muted">{{if .Live}}Waiting for results…{{else}}This run produced no results.{{end}}</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}{{end}}

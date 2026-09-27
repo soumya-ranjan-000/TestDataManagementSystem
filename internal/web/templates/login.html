@@ -1,0 +1,11 @@
+{{define "content"}}
+<div class="panel auth">
+  <h1>TDMS</h1>
+  <p class="muted">Test Data Management System — sign in with your team account.</p>
+  <form method="post" action="/login" class="stack">
+    <label>Email <input type="email" name="email" value="{{.Data}}" autocomplete="username" required autofocus></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+    <button type="submit" class="primary">Sign in</button>
+  </form>
+</div>
+{{end}}

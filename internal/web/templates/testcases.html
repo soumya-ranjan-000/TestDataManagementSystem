@@ -1,0 +1,163 @@
+{{define "content"}}
+<h1>Test cases</h1>
+<div id="tc-browser" data-loading>{{template "browser" .}}</div>
+{{end}}
+
+{{define "browser"}}{{with .Data}}
+<div class="tc-layout">
+  <aside class="tc-folders" aria-label="Folders">
+    <a href="{{.AllURL}}" hx-get="{{.AllURL}}" hx-target="#tc-browser" hx-push-url="true"
+       class="folder{{if eq .State.Folder ""}} active{{end}}">
+      <span>All test cases</span><span class="count">{{.AllCount}}</span>
+    </a>
+    {{range .Folders}}
+    <a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#tc-browser" hx-push-url="true"
+       class="folder depth-{{.Depth}}{{if .Active}} active{{end}}" title="{{.Path}}">
+      <span>{{.Name}}</span><span class="count">{{.Total}}</span>
+    </a>
+    {{else}}
+    <p class="muted small">Folders appear after the first scan syncs them.</p>
+    {{end}}
+  </aside>
+
+  <section class="tc-main">
+    <form id="tc-filters" class="toolbar" method="get" action="/testcases"
+          hx-get="/testcases" hx-target="#tc-results" hx-push-url="true"
+          hx-trigger="submit, input changed delay:350ms from:find input[name='q'], change from:find select">
+      <input type="hidden" name="folder" value="{{.State.Folder}}">
+      <input type="search" name="q" value="{{.State.Q}}" placeholder="Search by key or summary" aria-label="Search" class="grow" maxlength="200">
+      <select name="filter" aria-label="Filter">
+        {{range .Filters}}<option value="{{.Value}}"{{if eq .Value $.Data.State.Filter}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <select name="env" aria-label="Environment">
+        {{range .Environments}}<option value="{{.Name}}"{{if eq .Name $.Data.State.Env}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      <noscript><button type="submit">Apply</button></noscript>
+    </form>
+
+    <div id="tc-results" data-loading>{{template "results" $}}</div>
+  </section>
+</div>
+{{end}}{{end}}
+
+{{define "results"}}{{$loc := .Loc}}{{with .Data}}
+<form method="post" action="/testcases/action" class="tc-actions" data-selection-form>
+  <div class="toolbar">
+    <span class="muted small" data-selection-count>No test cases selected</span>
+    <button type="submit" name="action" value="validate" data-needs-selection disabled>Validate</button>
+    <button type="submit" name="action" value="heal" data-needs-selection disabled>Heal</button>
+    <button type="submit" name="action" value="regenerate" class="danger" data-needs-selection disabled
+            data-confirm="Replace the selected test cases' test data with fresh PNRs?">Regenerate</button>
+    <span class="muted small push-right">Actions apply to <strong>{{.State.Env}}</strong>.</span>
+  </div>
+
+  <table class="tc-table">
+    <thead>
+      <tr>
+        <th class="narrow"><input type="checkbox" data-select-all="slot_id" aria-label="Select all on this page"></th>
+        <th class="narrow"></th>
+        <th>Key</th>
+        <th>Summary</th>
+        <th class="narrow">V</th>
+        <th>Test data</th>
+        <th>State</th>
+        <th>Last check</th>
+      </tr>
+    </thead>
+    <tbody>
+    {{range .Rows}}
+    <tr>
+      <td>{{if and .SlotID (not .OrphanedAt)}}<input type="checkbox" name="slot_id" value="{{deref .SlotID}}" aria-label="Select {{.Key}}">{{end}}</td>
+      <td>
+        <button type="button" class="expander" aria-expanded="false" aria-controls="detail-{{.ID}}"
+                aria-label="Show details for {{.Key}}" data-toggle-row="detail-{{.ID}}"
+                hx-get="/testcases/{{.ID}}/detail" hx-target="#detail-{{.ID}} > td" hx-trigger="click once">›</button>
+      </td>
+      <td class="mono nowrap">{{.Key}}</td>
+      <td class="summary">{{.Summary}}</td>
+      <td><span class="version">{{.Version}}</span></td>
+      <td>
+        {{if not .HasBlock}}<span class="muted">—</span>
+        {{else if .TestData}}
+          <ul class="td-list">{{range .TestData}}<li><span class="mono">{{.PNR}}</span>{{if .LastName}} <span class="muted">·</span> {{.LastName}}{{end}}</li>{{end}}</ul>
+        {{else}}<span class="muted">none yet</span>{{end}}
+      </td>
+      <td>
+        {{if not .HasBlock}}<span class="badge">NO TDMS BLOCK</span>
+        {{else if .OrphanedAt}}<span class="badge o-orphaned">ORPHANED</span>
+        {{else if .BlockError}}<span class="badge o-block_error" title="{{deref .BlockError}}">BLOCK ERROR</span>
+        {{else if .InstanceState}}<span class="badge i-{{lower (deref .InstanceState)}}">{{deref .InstanceState}}</span>{{with .LastOutcome}} <span class="badge o-{{.}}">{{.}}</span>{{end}}
+        {{else if .SlotID}}<span class="badge o-invalid">EMPTY</span>
+        {{else}}<span class="badge">NOT SYNCED</span>{{end}}
+      </td>
+      <td class="nowrap">{{tm $loc .LastCheckedAt}}</td>
+    </tr>
+    <tr id="detail-{{.ID}}" class="detail-row" hidden><td colspan="8"><span class="loading-line"><span class="spinner" aria-hidden="true"></span>Loading details…</span></td></tr>
+    {{else}}
+    <tr><td colspan="8" class="muted">
+      {{if or .State.Q (ne .State.Filter "all")}}No test cases match. Try a different search or filter.
+      {{else}}No test cases yet. Run a <a href="/scans/new">scan</a> to sync them from the test management app.{{end}}
+    </td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</form>
+
+<nav class="pager" aria-label="Pagination">
+  <span class="muted">{{if .Total}}{{.From}}–{{.To}} of {{.Total}}{{else}}0 of 0{{end}}</span>
+  <span class="pager-links">
+    {{if .FirstURL}}<a href="{{.FirstURL}}" hx-get="{{.FirstURL}}" hx-target="#tc-results" hx-push-url="true" aria-label="First page">«</a>{{else}}<span class="disabled">«</span>{{end}}
+    {{if .PrevURL}}<a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#tc-results" hx-push-url="true" aria-label="Previous page">‹ Prev</a>{{else}}<span class="disabled">‹ Prev</span>{{end}}
+    <span>Page {{.Page}} of {{.Pages}}</span>
+    {{if .NextURL}}<a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#tc-results" hx-push-url="true" aria-label="Next page">Next ›</a>{{else}}<span class="disabled">Next ›</span>{{end}}
+    {{if .LastURL}}<a href="{{.LastURL}}" hx-get="{{.LastURL}}" hx-target="#tc-results" hx-push-url="true" aria-label="Last page">»</a>{{else}}<span class="disabled">»</span>{{end}}
+  </span>
+  <label class="rows-per-page">Rows per page
+    <select name="size" hx-get="/testcases" hx-include="#tc-filters" hx-target="#tc-results" hx-push-url="true">
+      {{range .Sizes}}<option value="{{.}}"{{if eq . $.Data.State.Size}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+</nav>
+{{end}}{{end}}
+
+{{define "detail"}}{{$loc := .Loc}}{{with .Data}}
+<div class="tc-detail">
+  <div class="tc-detail-yaml">
+    <h3>TDMS block</h3>
+    {{if .FolderPaths}}<p class="muted small">Folder: {{range $i, $p := .FolderPaths}}{{if $i}}, {{end}}{{$p}}{{end}} · version {{.Version}}</p>{{end}}
+    {{if .RawBlock}}<pre class="yaml">{{.RawBlock}}</pre>
+    {{else}}<p class="muted">This test case has no TDMS block, so TDMS doesn't manage test data for it.</p>{{end}}
+  </div>
+  <div class="tc-detail-data">
+    <h3>Test data</h3>
+    {{range .Slots}}
+    <div class="env-block">
+      <div class="env-head"><strong>{{.Environment}}</strong> <span class="muted">{{.Class}}</span>
+        {{with .LastOutcome}}<span class="badge o-{{.}}">{{.}}</span>{{end}}
+        {{if .LastCheckedAt}}<span class="muted small">checked {{tm $loc .LastCheckedAt}}</span>{{end}}
+      </div>
+      {{with .BlockError}}<p class="bad small">Latest block is invalid (still using the last good one): {{.}}</p>{{end}}
+      {{if .OrphanedAt}}<p class="muted small">Orphaned {{tm $loc .OrphanedAt}}: no longer managed.</p>{{end}}
+      <table class="compact-table">
+        <thead><tr><th>PNR</th><th>Last name</th><th>State</th><th>Created</th><th>Retired</th></tr></thead>
+        <tbody>
+        {{range .Instances}}
+        <tr{{if eq .State "RETIRED"}} class="dim"{{end}}>
+          <td class="mono">{{if .PNR}}{{.PNR}}{{else}}—{{end}}</td>
+          <td>{{range .TestData}}{{.LastName}}{{end}}</td>
+          <td><span class="badge i-{{lower .State}}">{{.State}}</span>{{with .RetireReason}} <span class="muted small">{{.}}</span>{{end}}</td>
+          <td class="nowrap">{{tm $loc .CreatedAt}}</td>
+          <td class="nowrap">{{tm $loc .RetiredAt}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="muted">No PNR generated yet.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="muted">{{if .RawBlock}}Not synced into any environment yet. Run a scan.{{else}}—{{end}}</p>
+    {{end}}
+  </div>
+</div>
+{{end}}{{end}}

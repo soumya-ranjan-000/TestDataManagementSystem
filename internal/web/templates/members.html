@@ -1,0 +1,56 @@
+{{define "content"}}{{$loc := .Loc}}{{$me := .User.ID}}
+<h1>Members</h1>
+{{with .Data}}
+{{if .TempPassword}}
+<div class="panel secret">
+  <p>Temporary password for <strong>{{.TempPasswordFor}}</strong>:</p>
+  <p class="mono big">{{.TempPassword}}</p>
+  <p class="hint">Shown only this once. They'll be asked to choose their own password when they sign in.</p>
+</div>
+{{end}}
+
+<table>
+  <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Status</th><th>Added</th><th></th></tr></thead>
+  <tbody>
+  {{range .Members}}
+  <tr>
+    <td>{{.Email}}{{if eq .ID $me}} <span class="muted">(you)</span>{{end}}</td>
+    <td>{{.Name}}</td>
+    <td>
+      <form method="post" action="/settings/members/{{.ID}}/role" class="inline">
+        <select name="role">
+          <option value="member" {{if eq .Role "member"}}selected{{end}}>member</option>
+          <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
+        </select>
+        <button type="submit" class="small">Save</button>
+      </form>
+    </td>
+    <td>{{if .MustChangePassword}}<span class="muted">hasn't set a password yet</span>{{else}}active{{end}}</td>
+    <td>{{tm $loc .CreatedAt}}</td>
+    <td class="actions">
+      <form method="post" action="/settings/members/{{.ID}}/reset" class="inline">
+        <button type="submit" class="small" data-confirm="Reset this member's password and sign them out?">Reset password</button>
+      </form>
+      {{if ne .ID $me}}
+      <form method="post" action="/settings/members/{{.ID}}/delete" class="inline">
+        <button type="submit" class="small danger" data-confirm="Remove this member from the team?">Remove</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<section class="panel">
+  <h2>Add a member</h2>
+  <form method="post" action="/settings/members" class="inline add">
+    <input type="email" name="email" placeholder="colleague@example.com" required>
+    <input name="name" placeholder="Name" maxlength="100">
+    <select name="role"><option value="member">member</option><option value="admin">admin</option></select>
+    <button type="submit" class="primary">Add member</button>
+  </form>
+  <p class="hint">Members can run scans, validate and regenerate test data, and see reports. Admins can also change settings and manage members.</p>
+</section>
+{{end}}
+{{end}}

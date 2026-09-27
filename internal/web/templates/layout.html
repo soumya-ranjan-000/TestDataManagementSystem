@@ -1,0 +1,39 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
+<title>{{.Title}} · TDMS</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+{{if .User}}
+<header class="topbar">
+  <a class="brand" href="/">TDMS</a>
+  <nav>
+    <a href="/" {{if eq .Active "dashboard"}}class="active"{{end}}>Dashboard</a>
+    <a href="/testcases" {{if eq .Active "testcases"}}class="active"{{end}}>Test cases</a>
+    <a href="/scans/new" {{if eq .Active "scans"}}class="active"{{end}}>Custom scan</a>
+    <a href="/runs" {{if eq .Active "runs"}}class="active"{{end}}>Runs</a>
+    <a href="/reports/generation" {{if eq .Active "report"}}class="active"{{end}}>Creation report</a>
+    {{if eq .User.Role "admin"}}
+    <a href="/settings" {{if eq .Active "settings"}}class="active"{{end}}>Settings</a>
+    <a href="/settings/members" {{if eq .Active "members"}}class="active"{{end}}>Members</a>
+    {{end}}
+  </nav>
+  <div class="who">
+    <span class="muted">{{if .Team}}{{.Team.Name}} · {{end}}{{.User.Email}}</span>
+    <form method="post" action="/logout"><button type="submit" class="linklike">Sign out</button></form>
+  </div>
+</header>
+{{end}}
+<main{{if not .User}} class="narrow"{{end}}>
+  {{if .Notice}}<div class="notice" role="status">{{.Notice}}</div>{{end}}
+  {{if .Error}}<div class="error" role="alert">{{.Error}}</div>{{end}}
+  {{template "content" .}}
+</main>
+</body>
+</html>{{end}}

@@ -1,0 +1,76 @@
+{{define "content"}}{{$loc := .Loc}}
+<h1>Dashboard</h1>
+{{with .Data}}
+<section class="cards">
+  {{range .Stats}}
+  <div class="card">
+    <div class="card-title">{{.Environment}}</div>
+    <div class="stat-row">
+      <div><span class="stat ok">{{.Valid}}</span><span class="stat-label">valid</span></div>
+      <div><span class="stat warn">{{.Empty}}</span><span class="stat-label">empty</span></div>
+      <div><span class="stat">{{.Generating}}</span><span class="stat-label">generating</span></div>
+      <div><span class="stat muted">{{.Orphaned}}</span><span class="stat-label">orphaned</span></div>
+    </div>
+  </div>
+  {{else}}
+  <div class="panel muted">No test data yet. An admin sets the test case folder in <a href="/settings">Settings</a>; then run a <a href="/scans/new">scan</a>.</div>
+  {{end}}
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <h2>Schedule</h2>
+    {{if .NextRun}}
+    <p>Next scheduled heal run: <strong>{{tm $loc .NextRun}}</strong></p>
+    {{else}}
+    <p class="muted">No daily run times are set, so nothing runs automatically.</p>
+    {{end}}
+    <p><a class="button" href="/scans/new">Run a scan now</a></p>
+  </section>
+
+  <section class="panel">
+    <h2>Recent runs</h2>
+    {{if .Runs}}
+    <table>
+      <thead><tr><th>Started</th><th>Mode</th><th>Status</th><th>Result</th></tr></thead>
+      <tbody>
+      {{range .Runs}}
+      <tr>
+        <td><a href="/runs/{{.ID}}">{{tm $loc .CreatedAt}}</a></td>
+        <td>{{.Mode}}{{if eq .Trigger "scheduled"}} <span class="muted">(scheduled)</span>{{end}}</td>
+        <td><span class="badge s-{{.Status}}">{{.Status}}</span></td>
+        <td>{{.Counts.Valid}} valid · {{.Counts.Invalid}} invalid · {{.Counts.Generated}} generated{{if .Counts.Errors}} · <span class="bad">{{.Counts.Errors}} errors</span>{{end}}</td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+    <p><a href="/runs">All runs</a></p>
+    {{else}}
+    <p class="muted">No runs yet.</p>
+    {{end}}
+  </section>
+</div>
+
+<section class="panel">
+  <h2>Recent problems</h2>
+  {{if .Problems}}
+  <table>
+    <thead><tr><th>When</th><th>Test case</th><th>Env</th><th>Problem</th><th>Detail</th></tr></thead>
+    <tbody>
+    {{range .Problems}}
+    <tr>
+      <td>{{tm $loc .CreatedAt}}</td>
+      <td>{{.TestCaseKey}}</td>
+      <td>{{.Environment}}</td>
+      <td><span class="badge o-{{.Outcome}}">{{.Outcome}}</span></td>
+      <td class="detail">{{deref .Error}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">Nothing has gone wrong recently.</p>
+  {{end}}
+</section>
+{{end}}
+{{end}}

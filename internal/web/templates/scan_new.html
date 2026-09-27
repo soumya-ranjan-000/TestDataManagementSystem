@@ -1,0 +1,20 @@
+{{define "content"}}
+<h1>Custom scan</h1>
+<div class="panel">
+  <p>A scan first syncs the TDMS blocks from your test management app, then checks every test case's live PNR against its rules.</p>
+  <form method="post" action="/scans" class="stack">
+    <fieldset>
+      <legend>What should it do with invalid test data?</legend>
+      <label class="choice"><input type="radio" name="mode" value="check" checked> <span><strong>Report only</strong> — find invalid test data without changing anything.</span></label>
+      <label class="choice"><input type="radio" name="mode" value="heal"> <span><strong>Heal</strong> — retire invalid PNRs and generate fresh ones (fills empty slots too).</span></label>
+    </fieldset>
+    <label>Environment
+      <select name="environment">
+        <option value="">All of the team's environments</option>
+        {{range .Data.Environments}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <div><button type="submit" class="primary">Start scan</button></div>
+  </form>
+</div>
+{{end}}

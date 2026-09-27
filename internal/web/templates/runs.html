@@ -1,0 +1,24 @@
+{{define "content"}}{{$loc := .Loc}}
+<h1>Runs</h1>
+<table>
+  <thead><tr><th>Created</th><th>Trigger</th><th>Mode</th><th>Scope</th><th>Status</th><th>Checked</th><th>Valid</th><th>Invalid</th><th>Generated</th><th>Errors</th></tr></thead>
+  <tbody>
+  {{range .Data}}
+  <tr>
+    <td><a href="/runs/{{.ID}}">{{tm $loc .CreatedAt}}</a></td>
+    <td>{{.Trigger}}</td>
+    <td>{{.Mode}}</td>
+    <td>{{if .Scope.SlotIDs}}{{len .Scope.SlotIDs}} selected{{else if .Scope.Environment}}{{.Scope.Environment}}{{else}}whole folder{{end}}</td>
+    <td><span class="badge s-{{.Status}}">{{.Status}}</span></td>
+    <td>{{.Counts.Total}}</td>
+    <td>{{.Counts.Valid}}</td>
+    <td>{{.Counts.Invalid}}</td>
+    <td>{{.Counts.Generated}}</td>
+    <td>{{if .Counts.Errors}}<span class="bad">{{.Counts.Errors}}</span>{{else}}0{{end}}</td>
+  </tr>
+  {{else}}
+  <tr><td colspan="10" class="muted">No runs yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}

@@ -1,0 +1,29 @@
+{{define "content"}}{{$loc := .Loc}}
+<h1>Test data creation report</h1>
+{{with .Data}}
+<form method="get" action="/reports/generation" class="toolbar">
+  <label>From <input type="date" name="from" value="{{.From}}"></label>
+  <label>To <input type="date" name="to" value="{{.To}}"></label>
+  <button type="submit">Show</button>
+</form>
+<p class="muted">{{len .Instances}} PNR(s) created between {{.From}} and {{.To}} (inclusive, {{$loc}} time).</p>
+<table>
+  <thead><tr><th>Created</th><th>Test case</th><th>Env</th><th>PNR</th><th>Now</th><th>Retired</th><th>Run</th></tr></thead>
+  <tbody>
+  {{range .Instances}}
+  <tr>
+    <td>{{tm $loc .CreatedAt}}</td>
+    <td>{{.TestCaseKey}}</td>
+    <td>{{.Environment}}</td>
+    <td class="mono">{{.PNR}}</td>
+    <td><span class="badge i-{{lower .State}}">{{.State}}</span>{{with .RetireReason}} <span class="muted">({{.}})</span>{{end}}</td>
+    <td>{{tm $loc .RetiredAt}}</td>
+    <td>{{with .RunID}}<a href="/runs/{{deref .}}">{{shortID (deref .)}}</a>{{else}}—{{end}}</td>
+  </tr>
+  {{else}}
+  <tr><td colspan="7" class="muted">No test data was created in this period.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}

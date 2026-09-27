@@ -1,5 +1,6 @@
 // Command tdms is TDMS's entrypoint:
 //
+//	tdms serve                                    web UI + worker + scheduler
 //	tdms add-environment --name --pss-url         operator: register an environment
 //	tdms create-team --name --project --env --admin-email
 //	                                              operator: create a team and its first admin
@@ -30,6 +31,7 @@ import (
 const usage = `usage: tdms <command> [flags]
 
 commands:
+  serve             run the web UI, worker and scheduler
   add-environment   register an environment and its PSS URL (operator)
   create-team       create a team with its QMetry project and first admin (operator)
   scan              run one scan for a team and print the report`
@@ -45,6 +47,8 @@ func main() {
 
 	var err error
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	case "serve":
+		err = runServe(ctx, args)
 	case "add-environment":
 		err = runAddEnvironment(ctx, args)
 	case "create-team":

@@ -1,0 +1,107 @@
+{{define "content"}}
+<h1>Team settings</h1>
+{{$team := .Team}}
+{{with .Data}}
+
+<section class="panel">
+  <h2>Test management app</h2>
+  <div class="meta">
+    <div><span class="label">App</span>QMetry</div>
+    <div><span class="label">Project</span><span class="mono">{{$team.TCMProjectKey}}</span> <span class="muted">(assigned by the TDMS operator)</span></div>
+  </div>
+  <form method="post" action="/settings/integration" class="stack">
+    <label>TDMS custom field id
+      <input name="custom_field_id" value="{{$team.TCMCustomFieldID}}" placeholder="qcf_7932330" required pattern="[A-Za-z0-9_]{1,64}">
+      <span class="hint">The QMetry custom field that holds each test case's TDMS requirement &amp; rules block.</span>
+    </label>
+    <label>Test case folder path
+      <input name="folder_path" value="{{$team.TCMFolderPath}}" placeholder="/chatbot-booking-retrival">
+      <span class="hint">Only test cases in this folder and its subfolders are managed. Leave empty for the whole project.</span>
+    </label>
+    <div class="toolbar">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" hx-post="/settings/test-connection" hx-target="#connection" hx-swap="innerHTML"
+              hx-indicator="#connection-indicator" hx-disabled-elt="this">Test connection</button>
+      <span id="connection-indicator" class="htmx-indicator loading-line"><span class="spinner" aria-hidden="true"></span>Testing connection to QMetry…</span>
+    </div>
+  </form>
+  <div id="connection"></div>
+</section>
+
+<section class="panel">
+  <h2>Environments</h2>
+  <form method="post" action="/settings/environments" class="stack">
+    {{range .Available}}
+    <label class="choice"><input type="checkbox" name="environment_id" value="{{.ID}}" {{if index $.Data.Enrolled .ID}}checked{{end}}> <span><strong>{{.Name}}</strong> <span class="muted">{{.PSSBaseURL}}</span></span></label>
+    {{else}}
+    <p class="muted">The TDMS operator hasn't defined any environments yet.</p>
+    {{end}}
+    <p class="hint">The TDMS operator defines environments and the PSS each one uses.</p>
+    <div><button type="submit">Save environments</button></div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Daily run times</h2>
+  <form method="post" action="/settings/schedule" class="stack">
+    <label>Run times (24-hour, comma-separated)
+      <input name="run_times" value="{{.RunTimes}}" placeholder="02:00, 14:00">
+      <span class="hint">Each time queues a heal run: invalid test data is retired and regenerated. Set them a few hours before your automation pipeline. Leave empty to turn scheduled runs off.</span>
+    </label>
+    <label>Timezone
+      <input name="timezone" value="{{$team.Timezone}}" list="timezones" required>
+      <datalist id="timezones">
+        <option value="UTC"><option value="Asia/Dubai"><option value="Asia/Kolkata"><option value="Europe/London">
+        <option value="Europe/Berlin"><option value="America/New_York"><option value="Asia/Singapore">
+      </datalist>
+    </label>
+    <div><button type="submit">Save schedule</button></div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Report emails</h2>
+  <p class="muted">Each recipient gets one email per run with the sections they choose.</p>
+  <table>
+    <thead><tr><th>Email</th><th>Scan report</th><th>Generation report</th><th>Error report</th><th></th></tr></thead>
+    <tbody>
+    {{range .Recipients}}
+    <tr>
+      <td>{{.Email}}</td>
+      <td colspan="3">
+        <form method="post" action="/settings/recipients/{{.ID}}" class="inline">
+          <label class="choice"><input type="checkbox" name="on_scan" {{if .OnScan}}checked{{end}}> scan</label>
+          <label class="choice"><input type="checkbox" name="on_generation" {{if .OnGeneration}}checked{{end}}> generation</label>
+          <label class="choice"><input type="checkbox" name="on_error" {{if .OnError}}checked{{end}}> errors</label>
+          <button type="submit" class="small">Update</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/settings/recipients/{{.ID}}/delete" class="inline">
+          <button type="submit" class="small danger" data-confirm="Stop emailing this address?">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {{else}}
+    <tr><td colspan="5" class="muted">No one gets report emails yet.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  <form method="post" action="/settings/recipients" class="inline add">
+    <input type="email" name="email" placeholder="qa-team@example.com" required>
+    <label class="choice"><input type="checkbox" name="on_scan" checked> scan</label>
+    <label class="choice"><input type="checkbox" name="on_generation" checked> generation</label>
+    <label class="choice"><input type="checkbox" name="on_error" checked> errors</label>
+    <button type="submit">Add recipient</button>
+  </form>
+</section>
+{{end}}
+{{end}}
+
+{{define "connection"}}{{with .Data}}
+{{if .Err}}
+<div class="error">Connection failed: {{.Err}}</div>
+{{else}}
+<div class="notice">Connected. Found {{.Total}} test case(s) in this folder; {{len .WithBlock}} carry a TDMS block{{if .WithBlock}}: {{range $i, $k := .WithBlock}}{{if $i}}, {{end}}{{$k}}{{end}}{{end}}.</div>
+{{end}}
+{{end}}{{end}}
