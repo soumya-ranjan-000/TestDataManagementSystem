@@ -1,0 +1,6 @@
+# Secrets reach the container at runtime through env_file, never the image.
+.env
+.git
+/tdms
+/bin/
+*.md

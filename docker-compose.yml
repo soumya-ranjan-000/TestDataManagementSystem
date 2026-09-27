@@ -1,6 +1,18 @@
 services:
+  tdms:
+    build: .
+    image: tdms:latest
+    env_file: .env          # DATABASE_URL (Supabase), QMETRY_*, optional SMTP_*
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  # Local Postgres, only for working without Supabase:
+  #   docker compose --profile local-db up -d
+  # then set DATABASE_URL=postgres://tdms:tdms@postgres:5432/tdms?sslmode=disable
   postgres:
     image: postgres:16-alpine
+    profiles: ["local-db"]
     environment:
       POSTGRES_USER: tdms
       POSTGRES_PASSWORD: tdms
