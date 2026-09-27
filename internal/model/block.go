@@ -21,7 +21,8 @@ type Requirement struct {
 	TripType    string            `yaml:"trip_type"`
 	Passengers  map[string]int    `yaml:"passengers"`
 	Route       string            `yaml:"route"`
-	Depart      string            `yaml:"depart"` // relative date expression, e.g. "T+90d"
+	Depart      string            `yaml:"depart"`           // relative date expression, e.g. "T+90d"
+	Return      string            `yaml:"return,omitempty"` // relative date expression; required when trip_type is round_trip
 	Cabin       string            `yaml:"cabin"`
 	Ticketed    bool              `yaml:"ticketed"`
 	Ancillaries map[string]string `yaml:"ancillaries,omitempty"`

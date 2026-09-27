@@ -93,10 +93,15 @@ func evalTimeCompare(check dictionary.CompiledCheck, snap PNRSnapshot, cmp func(
 	return cmp(t, bound), nil
 }
 
-// evalWithin implements the check-in-window rule: now must fall between
-// (travel_date - opens_hrs) and (travel_date - closes_hrs) — "now is
-// before travel_date minus 48h", generalized to any bound pair.
+// evalWithin implements the check-in-window rule as a Don't: the PNR expires
+// once the window has closed (now is past travel_date - closes_hrs). A PNR
+// whose window hasn't opened yet is still valid data — it just isn't
+// check-in-ready — so opens_hrs never invalidates.
 func evalWithin(check dictionary.CompiledCheck, snap PNRSnapshot) (bool, error) {
+	return evalWithinAt(check, snap, time.Now().UTC())
+}
+
+func evalWithinAt(check dictionary.CompiledCheck, snap PNRSnapshot, now time.Time) (bool, error) {
 	travelDate, err := fieldTime(check, snap)
 	if err != nil {
 		return false, err
@@ -105,8 +110,6 @@ func evalWithin(check dictionary.CompiledCheck, snap PNRSnapshot) (bool, error) 
 	if !ok {
 		return false, fmt.Errorf("checkin_window check needs opens_hrs/closes_hrs, got %T", check.Value)
 	}
-	opens := travelDate.Add(-time.Duration(params["opens_hrs"]) * time.Hour)
 	closes := travelDate.Add(-time.Duration(params["closes_hrs"]) * time.Hour)
-	now := time.Now().UTC()
-	return !now.Before(opens) && !now.After(closes), nil
+	return !now.After(closes), nil
 }

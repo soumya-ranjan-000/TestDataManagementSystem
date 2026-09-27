@@ -1,17 +1,22 @@
 package dictionary
 
-// Seed returns the v1.0.0 dictionary: only the fields and operators today's
+// Seed returns the v1.1.0 dictionary: only the fields and operators today's
 // two rule templates (booking_status, checkin_window) actually reference.
 // A PNR has hundreds of attributes; this deliberately catalogues none of
 // them upfront, per "Seeded narrow".
+//
+// v1.1.0 widened booking.status to PSS's full status set. Cancelling a
+// ticketed booking lands on REFUNDED, not CANCELLED, so a cancel test on a
+// ticketed PNR needs `consumed_when: REFUNDED` to be expressible.
 func Seed() *Dictionary {
 	return &Dictionary{
-		Version: "1.0.0",
+		Version: "1.1.0",
 		Fields: map[string]Field{
 			"booking.status": {
-				Path:          "booking.status",
-				Type:          TypeEnum,
-				AllowedValues: []string{"CONFIRMED", "TICKETED", "CANCELLED"},
+				Path: "booking.status",
+				Type: TypeEnum,
+				AllowedValues: []string{"HELD", "CONFIRMED", "TICKETED", "CHECKED_IN", "BOARDED",
+					"FLOWN", "CANCELLED", "REFUNDED"},
 			},
 			"segment.travel_date": {
 				Path: "segment.travel_date",

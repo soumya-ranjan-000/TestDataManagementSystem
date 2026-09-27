@@ -5,6 +5,8 @@
 package qmetry
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -37,30 +39,49 @@ func (c *Client) authHeader() string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(raw))
 }
 
-func (c *Client) get(path string, query url.Values) ([]byte, error) {
+func (c *Client) get(ctx context.Context, path string, query url.Values) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, path, query, nil)
+}
+
+func (c *Client) post(ctx context.Context, path string, query url.Values, reqBody any) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, path, query, reqBody)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, reqBody any) ([]byte, error) {
 	u := c.BaseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	var body io.Reader
+	if reqBody != nil {
+		payload, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", c.authHeader())
 	req.Header.Set("apiKey", c.APIKey)
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("qmetry API error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("qmetry API error %d: %s", resp.StatusCode, string(respBody))
 	}
-	return body, nil
+	return respBody, nil
 }
 
 // CustomFieldValue is one entry of a test case's customFields map, as
@@ -93,9 +114,9 @@ type testCaseVersionResponse struct {
 // populates customFields in the response when the `fields` query param
 // names at least one field id — any field id unlocks the whole map,
 // which is then filtered here to the one the caller asked for.
-func (c *Client) GetTestCaseVersion(testCaseID string, versionNo int, fieldID string) (*TestCaseVersion, error) {
-	path := fmt.Sprintf("/rest/api/latest/testcases/%s/versions/%d", testCaseID, versionNo)
-	body, err := c.get(path, url.Values{"fields": {fieldID}})
+func (c *Client) GetTestCaseVersion(ctx context.Context, testCaseID string, versionNo int, fieldID string) (*TestCaseVersion, error) {
+	path := fmt.Sprintf("/rest/api/latest/testcases/%s/versions/%d", url.PathEscape(testCaseID), versionNo)
+	body, err := c.get(ctx, path, url.Values{"fields": {fieldID}})
 	if err != nil {
 		return nil, err
 	}

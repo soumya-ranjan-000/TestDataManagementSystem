@@ -1,170 +1,243 @@
-// Command tdms is TDMS's CLI entrypoint. Today it runs one ingest pass for
-// a single test case end-to-end: fetch the block from QMetry, unwrap+parse
-// it, validate every rule against the dictionary, compute its
-// change-detection hash, and (if DATABASE_URL is set) upsert its slot. If
-// --pnr is given, it also runs the live health check against that PNR —
-// "the live check runs ... at the moment data is handed to a test."
+// Command tdms is TDMS's entrypoint:
+//
+//	tdms add-environment --name --pss-url         operator: register an environment
+//	tdms create-team --name --project --env --admin-email
+//	                                              operator: create a team and its first admin
+//	tdms scan --team --mode check|heal [--env]    run one scan synchronously
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
-	"github.com/soumya-ranjan-000/tdms/internal/dictionary"
-	"github.com/soumya-ranjan-000/tdms/internal/ingest"
-	"github.com/soumya-ranjan-000/tdms/internal/model"
-	"github.com/soumya-ranjan-000/tdms/internal/pss"
+	"github.com/soumya-ranjan-000/tdms/internal/auth"
 	"github.com/soumya-ranjan-000/tdms/internal/qmetry"
-	"github.com/soumya-ranjan-000/tdms/internal/rules"
+	"github.com/soumya-ranjan-000/tdms/internal/runlog"
+	"github.com/soumya-ranjan-000/tdms/internal/scan"
 	"github.com/soumya-ranjan-000/tdms/internal/storage"
+	"github.com/soumya-ranjan-000/tdms/migrations"
 )
 
+const usage = `usage: tdms <command> [flags]
+
+commands:
+  add-environment   register an environment and its PSS URL (operator)
+  create-team       create a team with its QMetry project and first admin (operator)
+  scan              run one scan for a team and print the report`
+
 func main() {
-	if err := run(); err != nil {
+	_ = godotenv.Load() // .env is optional; real env vars always win
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, usage)
+		os.Exit(2)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var err error
+	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	case "add-environment":
+		err = runAddEnvironment(ctx, args)
+	case "create-team":
+		err = runCreateTeam(ctx, args)
+	case "scan":
+		err = runScan(ctx, args)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s\n", cmd, usage)
+		os.Exit(2)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	_ = godotenv.Load() // .env is optional; real env vars always win
-	ctx := context.Background()
-
-	testCaseID := flag.String("testcase", "", "QMetry test case id, the public API's opaque id (e.g. 854KiLA8uKmAmv)")
-	version := flag.Int("version", 1, "test case version number")
-	fieldID := flag.String("field", "qcf_7932330", "TDMS custom field id (TDMS Requirement & Rules, project ACP)")
-	environment := flag.String("environment", "acp-dev", "environment label stored on the slot")
-	pnr := flag.String("pnr", "", "optional: also run the live health check against this PNR")
-	flag.Parse()
-
-	if *testCaseID == "" {
-		return fmt.Errorf("--testcase is required")
+// openStore connects to DATABASE_URL and applies pending migrations.
+func openStore(ctx context.Context) (*storage.Store, *pgxpool.Pool, error) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return nil, nil, errors.New("DATABASE_URL is not set")
 	}
+	pool, err := storage.Connect(ctx, databaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connecting to postgres: %w", err)
+	}
+	if err := storage.Migrate(ctx, pool, migrations.FS); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("migrating: %w", err)
+	}
+	return storage.NewStore(pool), pool, nil
+}
 
-	baseURL := os.Getenv("QMETRY_BASE_URL")
-	email := os.Getenv("JIRA_EMAIL")
-	token := os.Getenv("JIRA_API_TOKEN")
-	apiKey := os.Getenv("QMETRY_API_KEY")
+// qmetryFromEnv returns the shared QMetry service-account client, or nil if
+// its credentials aren't configured.
+func qmetryFromEnv() *qmetry.Client {
+	baseURL, email := os.Getenv("QMETRY_BASE_URL"), os.Getenv("JIRA_EMAIL")
+	token, apiKey := os.Getenv("JIRA_API_TOKEN"), os.Getenv("QMETRY_API_KEY")
 	if baseURL == "" || email == "" || token == "" || apiKey == "" {
-		return fmt.Errorf("missing one of QMETRY_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN/QMETRY_API_KEY in env")
+		return nil
+	}
+	return qmetry.New(baseURL, email, token, apiKey)
+}
+
+func runAddEnvironment(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("add-environment", flag.ExitOnError)
+	name := fs.String("name", "", "environment name, e.g. acp-dev")
+	pssURL := fs.String("pss-url", "", "base URL of this environment's PSS")
+	fs.Parse(args)
+	if *name == "" || *pssURL == "" {
+		return errors.New("--name and --pss-url are required")
 	}
 
-	client := qmetry.New(baseURL, email, token, apiKey)
-
-	tcVersion, err := client.GetTestCaseVersion(*testCaseID, *version, *fieldID)
+	store, pool, err := openStore(ctx)
 	if err != nil {
-		return fmt.Errorf("fetching custom field: %w", err)
+		return err
 	}
-
-	block, err := qmetry.ParseBlock(tcVersion.CustomField.Value)
-	if err != nil {
-		return fmt.Errorf("parsing block: %w", err)
+	defer pool.Close()
+	if err := store.AddEnvironment(ctx, *name, *pssURL); err != nil {
+		return err
 	}
-
-	dict := dictionary.Seed()
-	fmt.Printf("dictionary: v%s\n\n", dict.Version)
-
-	var compiled []dictionary.CompiledCheck
-	for _, rule := range block.Validity.Rules {
-		checks, err := dict.Compile(rule)
-		if err != nil {
-			return fmt.Errorf("rule %q failed dictionary validation: %w", rule.Name, err)
-		}
-		compiled = append(compiled, checks...)
-		for _, c := range checks {
-			fmt.Printf("compiled check: field=%-20s operator=%-8s value=%v\n", c.Field, c.Operator, c.Value)
-		}
-	}
-
-	hash, err := ingest.Hash(block)
-	if err != nil {
-		return fmt.Errorf("hashing block: %w", err)
-	}
-
-	fmt.Println()
-	fmt.Printf("test case:   %s (%s)\n", tcVersion.Key, *testCaseID)
-	fmt.Printf("class:       %s\n", block.Validity.Class)
-	fmt.Printf("requirement: %+v\n", block.Requirement)
-	fmt.Printf("block hash:  %s\n", hash)
-
-	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
-		if err := persist(ctx, databaseURL, tcVersion.Key, *testCaseID, *environment, block, hash); err != nil {
-			return fmt.Errorf("persisting slot: %w", err)
-		}
-	} else {
-		fmt.Println("\n(DATABASE_URL not set — skipping persistence)")
-	}
-
-	if *pnr != "" {
-		if err := checkLivePNR(*pnr, compiled); err != nil {
-			return fmt.Errorf("live PNR check: %w", err)
-		}
-	}
-
+	fmt.Printf("environment %s -> %s\n", *name, *pssURL)
 	return nil
 }
 
-func persist(ctx context.Context, databaseURL, testCaseKey, qmetryTCID, environment string, block *model.Block, hash string) error {
-	pool, err := storage.Connect(ctx, databaseURL)
+func runCreateTeam(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("create-team", flag.ExitOnError)
+	name := fs.String("name", "", "team name, e.g. booking-squad")
+	project := fs.String("project", "", "QMetry project key the team owns, e.g. ACP (operator-assigned)")
+	envs := fs.String("env", "", "comma-separated environments to enroll the team in")
+	adminEmail := fs.String("admin-email", "", "email of the team's first admin")
+	adminName := fs.String("admin-name", "", "display name of the first admin")
+	field := fs.String("field", "", "optional initial TDMS custom field id (admins can change it)")
+	folder := fs.String("folder", "", "optional initial test case folder path (admins can change it)")
+	fs.Parse(args)
+	if *name == "" || *project == "" || *envs == "" || *adminEmail == "" {
+		return errors.New("--name, --project, --env and --admin-email are required")
+	}
+
+	store, pool, err := openStore(ctx)
 	if err != nil {
-		return fmt.Errorf("connecting to postgres: %w", err)
+		return err
 	}
 	defer pool.Close()
 
-	if err := storage.Migrate(ctx, pool, "migrations"); err != nil {
-		return fmt.Errorf("migrating: %w", err)
+	password, err := auth.TempPassword()
+	if err != nil {
+		return err
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	teamID, err := store.CreateTeam(ctx, *name, *project, splitList(*envs),
+		storage.User{Email: *adminEmail, Name: *adminName, PasswordHash: hash})
+	if err != nil {
+		return err
+	}
+	if *field != "" || *folder != "" {
+		if err := store.Team(teamID).UpdateIntegration(ctx, *field, *folder); err != nil {
+			return err
+		}
 	}
 
-	repo := storage.NewRepo(pool)
-	changed, err := repo.UpsertSlot(ctx, testCaseKey, qmetryTCID, block.Validity.Class, environment, block, hash)
-	if err != nil {
-		return fmt.Errorf("upserting slot: %w", err)
-	}
-	if changed {
-		fmt.Println("slot: created/updated (block changed)")
-	} else {
-		fmt.Println("slot: unchanged (hash matches what's stored — no-op)")
-	}
+	fmt.Printf("team %s created (project %s)\n", *name, *project)
+	fmt.Printf("admin login: %s\ntemporary password: %s\n", strings.ToLower(*adminEmail), password)
+	fmt.Println("(the admin must change it at first login)")
 	return nil
 }
 
-func checkLivePNR(pnr string, compiled []dictionary.CompiledCheck) error {
-	baseURL := os.Getenv("PSS_BASE_URL")
-	if baseURL == "" {
-		baseURL = "https://rag-chatbot-project-1.onrender.com"
+func runScan(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("scan", flag.ExitOnError)
+	teamName := fs.String("team", "", "team name")
+	mode := fs.String("mode", "check", "check (report only) or heal (retire and regenerate invalid data)")
+	env := fs.String("env", "", "optional: limit to one environment")
+	fs.Parse(args)
+	if *teamName == "" {
+		return errors.New("--team is required")
 	}
-	client := pss.New(baseURL)
+	runMode := storage.RunMode(*mode)
+	if runMode != storage.ModeCheck && runMode != storage.ModeHeal {
+		return errors.New("--mode must be check or heal")
+	}
 
-	booking, err := client.GetBooking(pnr)
+	store, pool, err := openStore(ctx)
 	if err != nil {
-		return fmt.Errorf("fetching live booking: %w", err)
+		return err
 	}
-	snap := pss.Snapshot(booking)
+	defer pool.Close()
 
-	fmt.Printf("\nlive PNR %s: raw status=%q -> canonical=%v\n", pnr, booking.Status, snap["booking.status"])
+	teamID, err := store.TeamIDByName(ctx, *teamName)
+	if err != nil {
+		return fmt.Errorf("team %q: %w", *teamName, err)
+	}
+	repo := store.Team(teamID)
+	team, err := repo.Settings(ctx)
+	if err != nil {
+		return err
+	}
+	runID, err := repo.CreateRun(ctx, runMode, storage.RunScope{Environment: *env}, nil)
+	if err != nil {
+		return err
+	}
+	if err := store.StartRun(ctx, runID); err != nil {
+		return err
+	}
+	run, err := repo.Run(ctx, runID)
+	if err != nil {
+		return err
+	}
 
-	allValid := true
-	for _, check := range compiled {
-		ok, err := rules.Evaluate(check, snap)
-		status := "PASS"
-		if err != nil {
-			status = "ERROR: " + err.Error()
-			allValid = false
-		} else if !ok {
-			status = "FAIL"
-			allValid = false
+	runLog := runlog.New(repo, run.ID, os.Stdout)
+	runner := scan.New(repo, team, qmetryFromEnv())
+	runner.Log = runLog
+	runErr := runner.Execute(ctx, run)
+	runLog.Close()
+	fmt.Println()
+	printRun(ctx, repo, run)
+	return runErr
+}
+
+func printRun(ctx context.Context, repo *storage.TeamRepo, run *storage.Run) {
+	fmt.Printf("run %s  mode=%s  status=%s\n", run.ID, run.Mode, run.Status)
+	if run.SyncError != nil {
+		fmt.Printf("sync error: %s\n", *run.SyncError)
+	}
+	items, err := repo.Items(ctx, run.ID)
+	if err != nil {
+		fmt.Println("could not load items:", err)
+		return
+	}
+	for _, it := range items {
+		fmt.Printf("  %-10s %-8s %-17s old=%-7s new=%-7s rule=%s %s\n",
+			it.TestCaseKey, it.Environment, it.Outcome,
+			deref(it.OldPNR), deref(it.NewPNR), deref(it.FailedRule), deref(it.Error))
+	}
+	c := run.Counts
+	fmt.Printf("total=%d valid=%d invalid=%d generated=%d errors=%d\n", c.Total, c.Valid, c.Invalid, c.Generated, c.Errors)
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return "-"
+	}
+	return *s
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
 		}
-		fmt.Printf("  rule check: field=%-20s operator=%-8s -> %s\n", check.Field, check.Operator, status)
 	}
-
-	if allValid {
-		fmt.Println("verdict: VALID")
-	} else {
-		fmt.Println("verdict: NOT VALID (would be retired and regenerated)")
-	}
-	return nil
+	return out
 }
