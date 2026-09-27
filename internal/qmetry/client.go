@@ -71,6 +71,15 @@ type CustomFieldValue struct {
 	Value     string `json:"value"`
 }
 
+// TestCaseVersion is the slice of a test case version's response TDMS
+// actually needs: its human key (for the slot's identity) plus one
+// custom field's value.
+type TestCaseVersion struct {
+	ID          string
+	Key         string
+	CustomField CustomFieldValue
+}
+
 type testCaseVersionResponse struct {
 	Data struct {
 		ID           string                      `json:"id"`
@@ -79,12 +88,12 @@ type testCaseVersionResponse struct {
 	} `json:"data"`
 }
 
-// GetCustomField fetches a single custom field's value off one test case
-// version. Confirmed live: QMetry's Open API only populates customFields
-// in the response when the `fields` query param names at least one field
-// id — any field id unlocks the whole map, which is then filtered here to
-// the one the caller asked for.
-func (c *Client) GetCustomField(testCaseID string, versionNo int, fieldID string) (*CustomFieldValue, error) {
+// GetTestCaseVersion fetches one test case version and pulls out its key
+// plus one custom field's value. Confirmed live: QMetry's Open API only
+// populates customFields in the response when the `fields` query param
+// names at least one field id — any field id unlocks the whole map,
+// which is then filtered here to the one the caller asked for.
+func (c *Client) GetTestCaseVersion(testCaseID string, versionNo int, fieldID string) (*TestCaseVersion, error) {
 	path := fmt.Sprintf("/rest/api/latest/testcases/%s/versions/%d", testCaseID, versionNo)
 	body, err := c.get(path, url.Values{"fields": {fieldID}})
 	if err != nil {
@@ -98,5 +107,5 @@ func (c *Client) GetCustomField(testCaseID string, versionNo int, fieldID string
 	if !ok {
 		return nil, fmt.Errorf("test case %s has no value for custom field %s", testCaseID, fieldID)
 	}
-	return &cf, nil
+	return &TestCaseVersion{ID: parsed.Data.ID, Key: parsed.Data.Key, CustomField: cf}, nil
 }

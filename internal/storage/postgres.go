@@ -1,8 +1,6 @@
 // Package storage is TDMS's own database: slots, current and retired
 // instances, environment, and (once TDMS calls into a real airline system)
-// reservations and traceability links. Not wired into cmd/tdms yet — the
-// first milestone proves ingest end-to-end without needing a live
-// Postgres instance; this package is the next piece to wire in.
+// reservations and traceability links.
 package storage
 
 import (

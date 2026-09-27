@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tdms
+      POSTGRES_PASSWORD: tdms
+      POSTGRES_DB: tdms
+    ports:
+      - "5432:5432"
+    volumes:
+      - tdms_pgdata:/var/lib/postgresql/data
+
+volumes:
+  tdms_pgdata:
